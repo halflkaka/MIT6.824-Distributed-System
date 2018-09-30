@@ -1,1 +1,2 @@
-# DS-assignnment
+# DS-assignment
+`export GOPATH=~/DS-assignment`
