@@ -42,6 +42,7 @@ type PBServer struct {
 	vshost string
 }
 
+//Replicate Get operation to the backup server
 func (pb *PBServer) replicateGet(args *GetArgs, reply *GetReply) bool {
 	if pb.view.Backup == "" {
 		return true
@@ -56,6 +57,7 @@ func (pb *PBServer) replicateGet(args *GetArgs, reply *GetReply) bool {
 	return false
 }
 
+//Replicate Put operation to the backup server
 func (pb *PBServer) replicatePut(args *PutArgs, reply *PutReply) bool {
 	if pb.view.Backup == "" {
 		return true
@@ -70,6 +72,9 @@ func (pb *PBServer) replicatePut(args *PutArgs, reply *PutReply) bool {
 	return false
 }
 
+//According to at-most-once, If it's a duplicated call, directly return the former value
+//Update key-value store
+//Record caller id
 func (pb *PBServer) getHelper(args *GetArgs, reply *GetReply) {
 	val, duplicate := pb.rand[args.Rand]
 	if duplicate {
@@ -87,15 +92,14 @@ func (pb *PBServer) getHelper(args *GetArgs, reply *GetReply) {
 		}
 		reply.Err = ""
 	} else {
-		// reply.Value = ""
-		if reply.Value == "" {
-			reply.Value = ""
-		}
 		reply.Err = ErrNoKey
 	}
 	pb.rand[args.Rand] = reply.Value
 }
 
+//According to at-most-once, If it's a duplicated call, directly return the former value
+//Update key-value store according to DoHash
+//Record caller id
 func (pb *PBServer) putHelper(args *PutArgs, reply *PutReply) {
 	val, duplicate := pb.rand[args.Rand]
 	if duplicate {
@@ -129,13 +133,9 @@ func (pb *PBServer) putHelper(args *PutArgs, reply *PutReply) {
 		if ok {
 			if reply.PreviousValue == "" {
 				reply.PreviousValue = val
-			} else {
-				if reply.PreviousValue == "" {
-					reply.PreviousValue = ""
-				}
 			}
-			pb.store[key] = value
 		}
+		pb.store[key] = value
 	}
 
 	reply.Err = ""
@@ -143,26 +143,28 @@ func (pb *PBServer) putHelper(args *PutArgs, reply *PutReply) {
 
 }
 
+//If server is Primary, make replication to the backup server.
+//If server is Backup, if receive a call from Primary, update its store
 func (pb *PBServer) Put(args *PutArgs, reply *PutReply) error {
 	// Your code here.
 	pb.mu.Lock()
 	defer pb.mu.Unlock()
 
-	if pb.view.Primary == pb.me {
+	if pb.view.Primary == pb.me { //primary server
 		if pb.replicatePut(args, reply) {
 			pb.putHelper(args, reply)
 		} else {
 			reply.PreviousValue = ""
 			reply.Err = ErrWrongServer
 		}
-	} else if pb.view.Backup == pb.me {
+	} else if pb.view.Backup == pb.me { //backup server
 		if args.Me == pb.view.Primary {
 			pb.putHelper(args, reply)
-		} else {
+		} else { //Call not from primary server
 			reply.PreviousValue = ""
 			reply.Err = ErrWrongServer
 		}
-	} else {
+	} else { //other server
 		reply.PreviousValue = ""
 		reply.Err = ErrWrongServer
 	}
@@ -170,26 +172,28 @@ func (pb *PBServer) Put(args *PutArgs, reply *PutReply) error {
 	return nil
 }
 
+//If server is Primary, make replication to the backup server.
+//If server is Backup, if receive a call from Primary, acknowledge the get operation
 func (pb *PBServer) Get(args *GetArgs, reply *GetReply) error {
 	// Your code here.
 	pb.mu.Lock()
 	defer pb.mu.Unlock()
 
-	if pb.view.Primary == pb.me {
+	if pb.view.Primary == pb.me { //primary server
 		if pb.replicateGet(args, reply) {
 			pb.getHelper(args, reply)
 		} else {
 			reply.Value = ""
 			reply.Err = ErrWrongServer
 		}
-	} else if pb.view.Backup == pb.me {
+	} else if pb.view.Backup == pb.me { //backup server
 		if args.Me == pb.view.Primary {
 			pb.getHelper(args, reply)
-		} else {
+		} else { //Call not from primary server
 			reply.Value = ""
 			reply.Err = ErrWrongServer
 		}
-	} else {
+	} else { //other server
 		reply.Value = ""
 		reply.Err = ErrWrongServer
 	}
@@ -197,6 +201,7 @@ func (pb *PBServer) Get(args *GetArgs, reply *GetReply) error {
 	return nil
 }
 
+//RPC call for copy
 func (pb *PBServer) Copy(args *CopyArgs, reply *CopyReply) error {
 	pb.mu.Lock()
 	defer pb.mu.Unlock()
@@ -213,6 +218,8 @@ func (pb *PBServer) Copy(args *CopyArgs, reply *CopyReply) error {
 	return nil
 }
 
+//If backup server was replaced by a new server,
+//copy the whole store to the new server
 func (pb *PBServer) copyStore() {
 	pb.mu.Lock()
 	defer pb.mu.Unlock()
@@ -227,8 +234,9 @@ func (pb *PBServer) copyStore() {
 	ok := call(pb.view.Backup, "PBServer.Copy", args, &reply)
 	if ok {
 		return
+	} else {
+		// fmt.Println("Backup copy error")
 	}
-	fmt.Printf("Backup copy error")
 }
 
 // ping the viewserver periodically.
@@ -245,7 +253,7 @@ func (pb *PBServer) tick() {
 		} else {
 			pb.view.Viewnum = 0
 		}
-		if pb.view.Backup != oldBackup && pb.me == reply.View.Primary {
+		if pb.view.Backup != oldBackup && pb.me == reply.View.Primary { //If backup server was replaced by a new server, copy the whole store to the new server
 			pb.copyStore()
 		}
 		return

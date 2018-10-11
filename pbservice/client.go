@@ -69,6 +69,7 @@ func call(srv string, rpcname string,
 	return false
 }
 
+//Refresh the view
 func (ck *Clerk) refresh() {
 	args := &viewservice.GetArgs{}
 	var reply viewservice.GetReply
@@ -98,14 +99,15 @@ func (ck *Clerk) Get(key string) string {
 		ck.refresh()
 	}
 
-	rand := nrand()
-	args := &GetArgs{Key: key, Me: ck.me, Rand: rand}
+	args := &GetArgs{Key: key, Me: ck.me, Rand: nrand()}
 	var reply GetReply
 
 	for {
 		ok := call(ck.primary, "PBServer.Get", args, &reply)
-		if ok && reply.Err != ErrWrongServer {
-			break
+		if ok {
+			if reply.Err != ErrWrongServer {
+				break
+			}
 		}
 		reply.Err = ""
 		ck.refresh()
@@ -124,8 +126,7 @@ func (ck *Clerk) PutExt(key string, value string, dohash bool) string {
 		ck.refresh()
 	}
 
-	rand := nrand()
-	args := &PutArgs{Key: key, Value: value, DoHash: dohash, Me: ck.me, Rand: rand}
+	args := &PutArgs{Key: key, Value: value, DoHash: dohash, Me: ck.me, Rand: nrand()}
 	var reply PutReply
 
 	for {
@@ -142,9 +143,8 @@ func (ck *Clerk) PutExt(key string, value string, dohash bool) string {
 	return reply.PreviousValue
 }
 
-func (ck *Clerk) Put(key string, value string) string {
-	v := ck.PutExt(key, value, false)
-	return v
+func (ck *Clerk) Put(key string, value string) {
+	ck.PutExt(key, value, false)
 }
 func (ck *Clerk) PutHash(key string, value string) string {
 	v := ck.PutExt(key, value, true)
