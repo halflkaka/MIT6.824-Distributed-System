@@ -3,7 +3,6 @@ package mapreduce
 import (
 	"container/list"
 	"fmt"
-	"sync"
 )
 
 type WorkerInfo struct {
@@ -32,28 +31,29 @@ func (mr *MapReduce) KillWorkers() *list.List {
 //Send RPC to Worker
 //To handle worker failures, re-assign the job given to the failed worker
 //to another worker
-func (mr *MapReduce) DeliverJobs(wk string, args *DoJobArgs) {
+func (mr *MapReduce) DeliverJobs(wk string, args *DoJobArgs, workers chan string) {
 	var reply DoJobReply
 	ok := call(wk, "Worker.DoJob", args, &reply)
 	if ok == false {
 		fmt.Printf("DoWork: RPC %s deliver jobs error\n", wk)
 		delete(mr.Workers, wk)
-		wk := mr.GetWorker()
-		mr.DeliverJobs(wk, args)
+		wk := mr.GetWorker(workers)
+		mr.DeliverJobs(wk, args, workers)
 	} else {
-		mr.registerChannel <- wk
+		workers <- wk
 	}
 }
 
 //Get next worker in the registerChannel
 //Use a mutex to avoid two threads use workers at same time
 //Seems that removing mutex also works
-func (mr *MapReduce) GetWorker() string {
-	var mutex sync.Mutex
-	wk := <-mr.registerChannel
-	mutex.Lock()
+func (mr *MapReduce) GetWorker(workers chan string) string {
+	wk := <-workers
+
+	mr.Lock.Lock()
 	mr.Workers[wk] = &WorkerInfo{wk}
-	mutex.Unlock()
+	mr.Lock.Unlock()
+
 	return wk
 }
 
@@ -62,15 +62,15 @@ func (mr *MapReduce) RunMaster() *list.List {
 	mr.Workers = make(map[string]*WorkerInfo)
 
 	for i := 0; i < mr.nMap; i++ {
-		wk := mr.GetWorker()
+		wk := mr.GetWorker(mr.registerChannel)
 		args := &DoJobArgs{mr.file, Map, i, mr.nReduce}
-		go mr.DeliverJobs(wk, args)
+		go mr.DeliverJobs(wk, args, mr.registerChannel)
 	}
 
 	for i := 0; i < mr.nReduce; i++ {
-		wk := mr.GetWorker()
+		wk := mr.GetWorker(mr.registerChannel)
 		args := &DoJobArgs{mr.file, Reduce, i, mr.nMap}
-		go mr.DeliverJobs(wk, args)
+		go mr.DeliverJobs(wk, args, mr.registerChannel)
 	}
 
 	return mr.KillWorkers()
