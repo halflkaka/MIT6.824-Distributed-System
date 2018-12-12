@@ -1,5 +1,5 @@
 # Distributed System
-Implementation for [MIT 6.824](http://css.csail.mit.edu/6.824/2014/), Distributed System. Also the course of Columbia University (https://columbia.github.io/ds1-class/). 
+Implementation for [MIT 6.824](http://css.csail.mit.edu/6.824/2014/), Distributed System.
 
 * Lab 1: mapreduce, get familiar with golang.
 * Lab 2: primary/backup key/value service, configuration is changed called view.
